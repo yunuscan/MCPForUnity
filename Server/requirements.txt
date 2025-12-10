@@ -1,3 +1,4 @@
 mcp
 requests
 uvicorn
+websockets

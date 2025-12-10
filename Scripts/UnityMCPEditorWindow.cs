@@ -50,11 +50,11 @@ namespace UnityMCP
 
             // --- Server Status ---
             GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("2. Internal Server Status", EditorStyles.boldLabel);
+            GUILayout.Label("2. Internal Server Status (WebSocket)", EditorStyles.boldLabel);
             
             if (UnityMCPServer.IsRunning)
             {
-                EditorGUILayout.HelpBox($"Server is RUNNING at {UnityMCPServer.URL}", MessageType.Info);
+                EditorGUILayout.HelpBox($"WebSocket Server is RUNNING at {UnityMCPServer.URL}", MessageType.Info);
                 if (GUILayout.Button("Stop Server"))
                 {
                     UnityMCPServer.StopServer();

@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Net;
+using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
@@ -17,9 +19,8 @@ namespace UnityMCP
         public static bool IsRunning => _isRunning;
         public const string URL = "http://localhost:8080/";
         
-        // Log storage
-        private static List<string> _logs = new List<string>();
-        private const int MAX_LOGS = 100;
+        // WebSocket storage
+        private static List<WebSocket> _clients = new List<WebSocket>();
 
         static UnityMCPServer()
         {
@@ -36,12 +37,8 @@ namespace UnityMCP
             _listener.Start();
             _isRunning = true;
 
-            // Subscribe to logs
-            Application.logMessageReceived += HandleLog;
-
-            Debug.Log($"[UnityMCP] Server started at {URL}");
+            Debug.Log($"[UnityMCP] WebSocket Server started at {URL}");
             
-            // Start listening loop
             Task.Run(ListenLoop);
         }
 
@@ -53,18 +50,16 @@ namespace UnityMCP
                 _listener.Stop();
                 _listener.Close();
             }
-            Application.logMessageReceived -= HandleLog;
-            Debug.Log("[UnityMCP] Server stopped.");
-        }
-
-        private static void HandleLog(string logString, string stackTrace, LogType type)
-        {
-            lock (_logs)
+            
+            // Close all sockets
+            foreach(var client in _clients)
             {
-                string entry = $"[{DateTime.Now:HH:mm:ss}] [{type}] {logString}";
-                _logs.Add(entry);
-                if (_logs.Count > MAX_LOGS) _logs.RemoveAt(0);
+                if(client.State == WebSocketState.Open)
+                    client.CloseAsync(WebSocketCloseStatus.NormalClosure, "Server stopping", CancellationToken.None);
             }
+            _clients.Clear();
+            
+            Debug.Log("[UnityMCP] Server stopped.");
         }
 
         private static async Task ListenLoop()
@@ -74,7 +69,25 @@ namespace UnityMCP
                 try
                 {
                     var context = await _listener.GetContextAsync();
-                    ProcessRequest(context);
+                    if (context.Request.IsWebSocketRequest)
+                    {
+                        ProcessWebSocketRequest(context);
+                    }
+                    else
+                    {
+                        // Fallback for simple HTTP ping
+                        if (context.Request.Url.AbsolutePath == "/ping")
+                        {
+                            byte[] buffer = Encoding.UTF8.GetBytes("Pong! Unity WebSocket Server is running.");
+                            context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+                            context.Response.Close();
+                        }
+                        else
+                        {
+                            context.Response.StatusCode = 400;
+                            context.Response.Close();
+                        }
+                    }
                 }
                 catch (Exception e)
                 {
@@ -83,148 +96,129 @@ namespace UnityMCP
             }
         }
 
-        private static void ProcessRequest(HttpListenerContext context)
+        private static async void ProcessWebSocketRequest(HttpListenerContext context)
         {
-            string method = context.Request.HttpMethod;
-            string path = context.Request.Url.AbsolutePath;
-
-            // 1. Ping
-            if (method == "GET" && path == "/ping")
+            WebSocketContext webSocketContext = null;
+            try
             {
-                SendResponse(context, "Pong! Unity is listening.");
-                return;
-            }
-
-            // 2. Console Logs
-            if (method == "GET" && path == "/console")
-            {
-                string logsJoined;
-                lock (_logs)
-                {
-                    logsJoined = string.Join("\n", _logs);
-                }
-                SendResponse(context, logsJoined);
-                return;
-            }
-
-            // 3. Hierarchy (New)
-            if (method == "GET" && path == "/hierarchy")
-            {
-                // Must run on main thread to access Unity API
-                string hierarchy = "";
-                bool done = false;
+                webSocketContext = await context.AcceptWebSocketAsync(subProtocol: null);
+                WebSocket webSocket = webSocketContext.WebSocket;
+                _clients.Add(webSocket);
                 
-                EditorApplication.delayCall += () =>
-                {
-                    StringBuilder sb = new StringBuilder();
-                    foreach (GameObject go in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
-                    {
-                        sb.AppendLine($"- {go.name} (ID: {go.GetInstanceID()})");
-                        foreach(Transform child in go.transform)
-                        {
-                            sb.AppendLine($"  - {child.name} (ID: {child.gameObject.GetInstanceID()})");
-                        }
-                    }
-                    hierarchy = sb.ToString();
-                    done = true;
-                };
+                Debug.Log("[UnityMCP] Client connected.");
 
-                // Simple wait for main thread (not production ready but works for simple example)
-                // In production, use TaskCompletionSource
-                int timeout = 100;
-                while (!done && timeout > 0)
-                {
-                    System.Threading.Thread.Sleep(10);
-                    timeout--;
-                }
-                
-                SendResponse(context, hierarchy);
-                return;
-            }
+                byte[] receiveBuffer = new byte[1024 * 4];
 
-            // 4. Execute Command
-            if (method == "POST" && path == "/execute")
-            {
-                using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
+                while (webSocket.State == WebSocketState.Open)
                 {
-                    string json = reader.ReadToEnd();
+                    WebSocketReceiveResult result = await webSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), CancellationToken.None);
                     
-                    // Dispatch to main thread
-                    EditorApplication.delayCall += () =>
+                    if (result.MessageType == WebSocketMessageType.Close)
                     {
-                        string result = HandleCommand(json);
-                        SendResponse(context, result);
-                    };
+                        await webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "", CancellationToken.None);
+                        _clients.Remove(webSocket);
+                        Debug.Log("[UnityMCP] Client disconnected.");
+                    }
+                    else
+                    {
+                        string message = Encoding.UTF8.GetString(receiveBuffer, 0, result.Count);
+                        // Handle message on Main Thread
+                        EditorApplication.delayCall += () => 
+                        {
+                            string response = HandleMessage(message);
+                            SendMessage(webSocket, response);
+                        };
+                    }
                 }
-                return;
             }
-
-            SendResponse(context, "Unknown command", 404);
+            catch (Exception e)
+            {
+                Debug.LogError($"[UnityMCP] WebSocket Error: {e.Message}");
+                if(webSocketContext != null) _clients.Remove(webSocketContext.WebSocket);
+            }
         }
 
-        private static string HandleCommand(string json)
+        private static async void SendMessage(WebSocket socket, string message)
+        {
+            if (socket.State != WebSocketState.Open) return;
+            byte[] buffer = Encoding.UTF8.GetBytes(message);
+            await socket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
+        }
+
+        // --- REFLECTION BASED COMMAND HANDLING ---
+
+        private static string HandleMessage(string json)
         {
             try
             {
                 CommandData data = JsonUtility.FromJson<CommandData>(json);
+                if (data == null || string.IsNullOrEmpty(data.method)) return ErrorJson("Invalid JSON");
 
-                if (data == null || string.IsNullOrEmpty(data.action))
-                {
-                    return "Invalid JSON or missing 'action' field.";
-                }
+                // Find method in this class
+                MethodInfo method = typeof(UnityMCPServer).GetMethod(data.method, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
 
-                switch (data.action)
-                {
-                    case "create_object":
-                        GameObject go = new GameObject(string.IsNullOrEmpty(data.name) ? "New Object" : data.name);
-                        if (data.position != null)
-                        {
-                            go.transform.position = new Vector3(data.position.x, data.position.y, data.position.z);
-                        }
-                        return $"Created GameObject: {go.name} (ID: {go.GetInstanceID()}) at {go.transform.position}";
+                if (method == null) return ErrorJson($"Method '{data.method}' not found.");
 
-                    default:
-                        return $"Unknown action: {data.action}";
-                }
+                // Invoke method
+                // Note: For simplicity, we assume methods take the raw CommandData or specific params.
+                // A robust system would map 'data.params' dictionary to method arguments.
+                // Here we pass the full data object for manual extraction inside methods.
+                object result = method.Invoke(null, new object[] { data });
+
+                return SuccessJson(result?.ToString());
             }
             catch (Exception e)
             {
-                return $"Error executing command: {e.Message}";
+                return ErrorJson(e.InnerException?.Message ?? e.Message);
             }
         }
 
-        private static void SendResponse(HttpListenerContext context, string responseString, int statusCode = 200)
+        // --- EXPOSED METHODS (API) ---
+
+        private static string CreateObject(CommandData data)
         {
-            try
-            {
-                byte[] buffer = Encoding.UTF8.GetBytes(responseString);
-                context.Response.StatusCode = statusCode;
-                context.Response.ContentLength64 = buffer.Length;
-                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
-                context.Response.OutputStream.Close();
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"[UnityMCP] Error sending response: {e.Message}");
-            }
-        }
-    }
+            string name = "New Object";
+            Vector3 pos = Vector3.zero;
 
-    // --- Data Structures for JSON ---
+            // Basic param parsing (In a real lib, use a proper JSON parser to get dict)
+            // Since JsonUtility is limited, we rely on the structure defined below
+            if (!string.IsNullOrEmpty(data.param_name)) name = data.param_name;
+            if (data.param_pos != null) pos = new Vector3(data.param_pos.x, data.param_pos.y, data.param_pos.z);
+
+            GameObject go = new GameObject(name);
+            go.transform.position = pos;
+            
+            return $"Created {go.name} at {pos}";
+        }
+
+        private static string GetHierarchy(CommandData data)
+        {
+            StringBuilder sb = new StringBuilder();
+            foreach (GameObject go in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
+            {
+                sb.AppendLine($"- {go.name}");
+            }
+            return sb.ToString();
+        }
+
+        // --- HELPERS ---
+
+        private static string ErrorJson(string msg) => $"{{\"status\":\"error\",\"message\":\"{msg}\"}}";
+        private static string SuccessJson(string result) => $"{{\"status\":\"success\",\"result\":\"{result}\"}}";
+    }
 
     [Serializable]
     public class CommandData
     {
-        public string action;
-        public string name;
-        public Vector3Data position;
+        public string method;
+        // Flattened params for JsonUtility simplicity
+        public string param_name;
+        public Vector3Data param_pos;
     }
 
     [Serializable]
     public class Vector3Data
     {
-        public float x;
-        public float y;
-        public float z;
+        public float x, y, z;
     }
 }
