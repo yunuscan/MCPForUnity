@@ -201,6 +201,77 @@ namespace UnityMCP
             return sb.ToString();
         }
 
+        private static string DeleteObject(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_name)) return "Name required";
+            
+            GameObject go = GameObject.Find(data.param_name);
+            if (go == null) return $"Object '{data.param_name}' not found.";
+            
+            string name = go.name;
+            GameObject.DestroyImmediate(go);
+            return $"Deleted object: {name}";
+        }
+
+        private static string AddComponent(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_name)) return "Object Name required";
+            if (string.IsNullOrEmpty(data.param_string)) return "Component Type required";
+
+            GameObject go = GameObject.Find(data.param_name);
+            if (go == null) return $"Object '{data.param_name}' not found.";
+
+            // Try to find type (simplified, might need full qualified name or assembly search)
+            // For built-in types, this often works if fully qualified or common
+            // Better approach: Search all assemblies
+            Type type = null;
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                type = assembly.GetType(data.param_string);
+                if (type == null) type = assembly.GetType($"UnityEngine.{data.param_string}");
+                if (type != null) break;
+            }
+
+            if (type == null) return $"Component Type '{data.param_string}' not found.";
+
+            Component comp = go.AddComponent(type);
+            return $"Added component {type.Name} to {go.name}";
+        }
+
+        private static string ModifyTransform(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_name)) return "Name required";
+            
+            GameObject go = GameObject.Find(data.param_name);
+            if (go == null) return $"Object '{data.param_name}' not found.";
+
+            if (data.param_pos != null) 
+                go.transform.position = new Vector3(data.param_pos.x, data.param_pos.y, data.param_pos.z);
+            
+            if (data.param_rot != null) 
+                go.transform.eulerAngles = new Vector3(data.param_rot.x, data.param_rot.y, data.param_rot.z);
+            
+            if (data.param_scale != null) 
+                go.transform.localScale = new Vector3(data.param_scale.x, data.param_scale.y, data.param_scale.z);
+
+            return $"Modified transform of {go.name}";
+        }
+
+        private static string FindObject(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_name)) return "Name required";
+            
+            GameObject go = GameObject.Find(data.param_name);
+            if (go == null) return "Object not found.";
+
+            string info = $"Name: {go.name}\nPosition: {go.transform.position}\nRotation: {go.transform.eulerAngles}\nScale: {go.transform.localScale}\nComponents:";
+            foreach(var c in go.GetComponents<Component>())
+            {
+                info += $"\n- {c.GetType().Name}";
+            }
+            return info;
+        }
+
         // --- HELPERS ---
 
         private static string ErrorJson(string msg) => $"{{\"status\":\"error\",\"message\":\"{msg}\"}}";
@@ -213,7 +284,10 @@ namespace UnityMCP
         public string method;
         // Flattened params for JsonUtility simplicity
         public string param_name;
+        public string param_string; // Generic string param (e.g. component name)
         public Vector3Data param_pos;
+        public Vector3Data param_rot;
+        public Vector3Data param_scale;
     }
 
     [Serializable]
