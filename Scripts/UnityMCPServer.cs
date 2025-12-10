@@ -14,7 +14,8 @@ namespace UnityMCP
     {
         private static HttpListener _listener;
         private static bool _isRunning;
-        private const string URL = "http://localhost:8080/";
+        public static bool IsRunning => _isRunning;
+        public const string URL = "http://localhost:8080/";
         
         // Log storage
         private static List<string> _logs = new List<string>();
@@ -26,7 +27,7 @@ namespace UnityMCP
             EditorApplication.quitting += StopServer;
         }
 
-        private static void StartServer()
+        public static void StartServer()
         {
             if (_isRunning) return;
 
@@ -44,7 +45,7 @@ namespace UnityMCP
             Task.Run(ListenLoop);
         }
 
-        private static void StopServer()
+        public static void StopServer()
         {
             _isRunning = false;
             if (_listener != null)
