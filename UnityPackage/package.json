@@ -1,0 +1,17 @@
+{
+  "name": "com.yunuscan.unitymcp",
+  "version": "0.1.0",
+  "displayName": "Unity MCP Server",
+  "description": "Model Context Protocol bridge for Unity Editor. Allows AI agents to interact with the Unity Editor.",
+  "unity": "2021.3",
+  "author": {
+    "name": "Yunus Can",
+    "url": "https://github.com/yunuscan/MCPForUnity"
+  },
+  "keywords": [
+    "mcp",
+    "ai",
+    "editor",
+    "tools"
+  ]
+}
