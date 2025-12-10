@@ -98,10 +98,36 @@ namespace UnityMCP
                     }
                     else
                     {
-                        // Fallback for simple HTTP ping
-                        if (context.Request.Url.AbsolutePath == "/ping")
+                        // Handle HTTP POST requests (REST API support)
+                        if (context.Request.HttpMethod == "POST")
                         {
-                            byte[] buffer = Encoding.UTF8.GetBytes("Pong! Unity WebSocket Server is running.");
+                            using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
+                            {
+                                string json = await reader.ReadToEndAsync();
+                                
+                                // Run on main thread
+                                string response = null;
+                                var tcs = new TaskCompletionSource<bool>();
+                                
+                                EditorApplication.delayCall += () => 
+                                {
+                                    response = HandleMessage(json);
+                                    tcs.SetResult(true);
+                                };
+                                
+                                await tcs.Task;
+
+                                byte[] buffer = Encoding.UTF8.GetBytes(response);
+                                context.Response.ContentType = "application/json";
+                                context.Response.ContentLength64 = buffer.Length;
+                                context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+                                context.Response.Close();
+                            }
+                        }
+                        // Fallback for simple HTTP ping
+                        else if (context.Request.Url.AbsolutePath == "/ping")
+                        {
+                            byte[] buffer = Encoding.UTF8.GetBytes("Pong! Unity MCP Server is running (WebSocket + HTTP).");
                             context.Response.OutputStream.Write(buffer, 0, buffer.Length);
                             context.Response.Close();
                         }
