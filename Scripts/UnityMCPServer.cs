@@ -26,9 +26,17 @@ namespace UnityMCP
 
         static UnityMCPServer()
         {
-            StartServer();
+            AssemblyReloadEvents.beforeAssemblyReload += StopServer;
             EditorApplication.quitting += StopServer;
             Application.logMessageReceived += HandleLog;
+            StartServer();
+        }
+
+        [MenuItem("MCP/Restart Server")]
+        public static void RestartServer()
+        {
+            StopServer();
+            StartServer();
         }
 
         private static void HandleLog(string logString, string stackTrace, LogType type)
@@ -41,14 +49,20 @@ namespace UnityMCP
         {
             if (_isRunning) return;
 
-            _listener = new HttpListener();
-            _listener.Prefixes.Add(URL);
-            _listener.Start();
-            _isRunning = true;
+            try 
+            {
+                _listener = new HttpListener();
+                _listener.Prefixes.Add(URL);
+                _listener.Start();
+                _isRunning = true;
 
-            Debug.Log($"[UnityMCP] WebSocket Server started at {URL}");
-            
-            Task.Run(ListenLoop);
+                Debug.Log($"[UnityMCP] WebSocket Server started at {URL}");
+                Task.Run(ListenLoop);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[UnityMCP] Failed to start server: {e.Message}");
+            }
         }
 
         public static void StopServer()
