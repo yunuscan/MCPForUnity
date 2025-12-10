@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.WebSockets;
 using System.Reflection;
@@ -21,11 +22,19 @@ namespace UnityMCP
         
         // WebSocket storage
         private static List<WebSocket> _clients = new List<WebSocket>();
+        private static List<string> _logBuffer = new List<string>();
 
         static UnityMCPServer()
         {
             StartServer();
             EditorApplication.quitting += StopServer;
+            Application.logMessageReceived += HandleLog;
+        }
+
+        private static void HandleLog(string logString, string stackTrace, LogType type)
+        {
+            if (_logBuffer.Count > 100) _logBuffer.RemoveAt(0);
+            _logBuffer.Add($"[{type}] {logString}");
         }
 
         public static void StartServer()
@@ -272,6 +281,234 @@ namespace UnityMCP
             return info;
         }
 
+        private static string CreateScript(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_name)) return "Script Name required";
+            if (string.IsNullOrEmpty(data.param_string)) return "Script Content required";
+
+            string folderPath = "Assets/Scripts/Generated";
+            if (!Directory.Exists(folderPath)) Directory.CreateDirectory(folderPath);
+
+            string fileName = data.param_name.EndsWith(".cs") ? data.param_name : data.param_name + ".cs";
+            string filePath = Path.Combine(folderPath, fileName);
+
+            File.WriteAllText(filePath, data.param_string);
+            AssetDatabase.Refresh();
+
+            return $"Script created at {filePath}. Compiling...";
+        }
+
+        private static string CreateMaterial(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_name)) return "Material Name required";
+
+            string folderPath = "Assets/Materials/Generated";
+            if (!Directory.Exists(folderPath)) Directory.CreateDirectory(folderPath);
+
+            string fileName = data.param_name.EndsWith(".mat") ? data.param_name : data.param_name + ".mat";
+            string filePath = Path.Combine(folderPath, fileName);
+
+            Material mat = new Material(Shader.Find("Standard"));
+            if (data.param_pos != null) // Using param_pos as RGB color for simplicity
+            {
+                mat.color = new Color(data.param_pos.x, data.param_pos.y, data.param_pos.z);
+            }
+
+            AssetDatabase.CreateAsset(mat, filePath);
+            AssetDatabase.SaveAssets();
+
+            return $"Material created at {filePath}";
+        }
+
+        private static string ListAssets(CommandData data)
+        {
+            string path = string.IsNullOrEmpty(data.param_string) ? "Assets" : data.param_string;
+            if (!Directory.Exists(path)) return $"Directory not found: {path}";
+
+            string[] files = Directory.GetFiles(path, "*.*", SearchOption.TopDirectoryOnly);
+            string[] dirs = Directory.GetDirectories(path, "*", SearchOption.TopDirectoryOnly);
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"Contents of {path}:");
+            foreach (string d in dirs) sb.AppendLine($"[DIR] {Path.GetFileName(d)}");
+            foreach (string f in files) 
+            {
+                if (!f.EndsWith(".meta")) sb.AppendLine($"[FILE] {Path.GetFileName(f)}");
+            }
+
+            return sb.ToString();
+        }
+
+        private static string ReadConsole(CommandData data)
+        {
+            StringBuilder sb = new StringBuilder();
+            if (_logBuffer.Count == 0) return "No logs.";
+            
+            foreach (var log in _logBuffer)
+            {
+                sb.AppendLine(log);
+            }
+            return sb.ToString();
+        }
+
+        private static string SetPlayMode(CommandData data)
+        {
+            bool play = data.param_string.ToLower() == "true";
+            EditorApplication.isPlaying = play;
+            return $"Play mode set to {play}";
+        }
+
+        private static string ExecuteMenuItem(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_string)) return "Menu path required";
+            bool result = EditorApplication.ExecuteMenuItem(data.param_string);
+            return result ? $"Executed menu item: {data.param_string}" : $"Failed to execute menu item: {data.param_string}";
+        }
+
+        private static string IsCompiling(CommandData data)
+        {
+            return EditorApplication.isCompiling.ToString();
+        }
+
+        private static string GetSelection(CommandData data)
+        {
+            if (Selection.activeGameObject == null) return "None";
+            return Selection.activeGameObject.name;
+        }
+
+        private static string SetSelection(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_name)) return "Name required";
+            GameObject go = GameObject.Find(data.param_name);
+            if (go == null) return "Object not found";
+            
+            Selection.activeGameObject = go;
+            return $"Selected {go.name}";
+        }
+
+        private static string InspectObject(CommandData data)
+        {
+            if (string.IsNullOrEmpty(data.param_name)) return "Name required";
+            GameObject go = GameObject.Find(data.param_name);
+            if (go == null) return "Object not found";
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine($"Object: {go.name}");
+            sb.AppendLine($"Layer: {LayerMask.LayerToName(go.layer)}");
+            sb.AppendLine($"Tag: {go.tag}");
+            sb.AppendLine("Components:");
+
+            foreach (Component comp in go.GetComponents<Component>())
+            {
+                if (comp == null) continue;
+                Type type = comp.GetType();
+                sb.AppendLine($"  [{type.Name}]");
+
+                // Fields
+                foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    sb.AppendLine($"    {field.Name}: {field.GetValue(comp)}");
+                }
+                // Properties
+                foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (prop.CanRead)
+                    {
+                        try { sb.AppendLine($"    {prop.Name}: {prop.GetValue(comp, null)}"); } catch {}
+                    }
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static string GetScreenshot(CommandData data)
+        {
+            Camera cam = Camera.main;
+            if (cam == null) return "No Main Camera found in the scene. Please add one.";
+
+            int width = 512;
+            int height = 512;
+            
+            RenderTexture rt = new RenderTexture(width, height, 24);
+            RenderTexture currentRT = RenderTexture.active;
+            RenderTexture currentCamTarget = cam.targetTexture;
+
+            try 
+            {
+                cam.targetTexture = rt;
+                cam.Render();
+                
+                RenderTexture.active = rt;
+                Texture2D tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                tex.Apply();
+                
+                byte[] bytes = tex.EncodeToJPG(75);
+                GameObject.DestroyImmediate(tex);
+                
+                string base64 = Convert.ToBase64String(bytes);
+                return base64;
+            }
+            finally
+            {
+                cam.targetTexture = currentCamTarget;
+                RenderTexture.active = currentRT;
+                if (rt != null) GameObject.DestroyImmediate(rt);
+            }
+        }
+
+        private static string SetComponentProperty(CommandData data)
+        {
+            // param_name: Object Name
+            // param_string: Component Name
+            // param_second: Property/Field Name
+            // param_value: New Value (as string)
+
+            if (string.IsNullOrEmpty(data.param_name)) return "Object Name required";
+            if (string.IsNullOrEmpty(data.param_string)) return "Component Name required";
+            if (string.IsNullOrEmpty(data.param_second)) return "Property Name required";
+            if (data.param_value == null) return "Value required";
+
+            GameObject go = GameObject.Find(data.param_name);
+            if (go == null) return "Object not found";
+
+            Component comp = go.GetComponent(data.param_string);
+            if (comp == null) return $"Component '{data.param_string}' not found on {go.name}";
+
+            Type type = comp.GetType();
+            MemberInfo member = type.GetField(data.param_second);
+            if (member == null) member = type.GetProperty(data.param_second);
+            if (member == null) return $"Property/Field '{data.param_second}' not found on {type.Name}";
+
+            try
+            {
+                object value = null;
+                Type targetType = (member is FieldInfo f) ? f.FieldType : ((PropertyInfo)member).PropertyType;
+
+                if (targetType == typeof(string)) value = data.param_value;
+                else if (targetType == typeof(int)) value = int.Parse(data.param_value);
+                else if (targetType == typeof(float)) value = float.Parse(data.param_value);
+                else if (targetType == typeof(bool)) value = bool.Parse(data.param_value);
+                else if (targetType.IsEnum) value = Enum.Parse(targetType, data.param_value);
+                // Add more types as needed (Vector3, Color parsing is harder from single string, maybe later)
+
+                if (value != null)
+                {
+                    if (member is FieldInfo field) field.SetValue(comp, value);
+                    else if (member is PropertyInfo prop) prop.SetValue(comp, value, null);
+                    return $"Set {data.param_second} to {value}";
+                }
+                else
+                {
+                    return $"Unsupported type: {targetType.Name}";
+                }
+            }
+            catch (Exception e)
+            {
+                return $"Error setting value: {e.Message}";
+            }
+        }
+
         // --- HELPERS ---
 
         private static string ErrorJson(string msg) => $"{{\"status\":\"error\",\"message\":\"{msg}\"}}";
@@ -285,6 +522,8 @@ namespace UnityMCP
         // Flattened params for JsonUtility simplicity
         public string param_name;
         public string param_string; // Generic string param (e.g. component name)
+        public string param_second; // Extra string param (e.g. property name)
+        public string param_value;  // Value param
         public Vector3Data param_pos;
         public Vector3Data param_rot;
         public Vector3Data param_scale;
