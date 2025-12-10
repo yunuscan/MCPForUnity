@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 using System.IO;
 using UnityEditor;
@@ -7,130 +8,186 @@ namespace UnityMCP
 {
     public class UnityMCPEditorWindow : EditorWindow
     {
-        [MenuItem("UnityMCP/Dashboard")]
-        public static void ShowWindow()
-        {
-            GetWindow<UnityMCPEditorWindow>("UnityMCP");
-        }
+        // UI State
+        private bool showDebugLogs = false;
+        private ValidationLevel validationLevel = ValidationLevel.Standard;
+        private bool showAdvancedSettings = false;
+        private bool showManualConfig = false;
+        private TransportType transportType = TransportType.WebSocket;
+        private string serverUrl = "ws://localhost:8080";
+        private ClientType selectedClient = ClientType.Cursor;
+        
+        private enum ValidationLevel { Basic, Standard, Strict }
+        private enum TransportType { HTTP, WebSocket }
+        private enum ClientType { Cursor, VSCode, ClaudeDesktop }
 
         private string ProjectRoot => Directory.GetParent(Application.dataPath).FullName;
         private string TargetServerPath => Path.Combine(ProjectRoot, "MCPServer");
 
+        [MenuItem("MCP/Dashboard")]
+        public static void ShowWindow()
+        {
+            GetWindow<UnityMCPEditorWindow>("MCP For Unity");
+        }
+
         private void OnGUI()
         {
-            GUILayout.Label("Unity MCP Server Control", EditorStyles.boldLabel);
-            EditorGUILayout.Space();
-
-            // --- Server Installation ---
-            GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("1. Server Installation", EditorStyles.boldLabel);
-            
-            bool serverExists = Directory.Exists(TargetServerPath);
-            if (!serverExists)
-            {
-                EditorGUILayout.HelpBox("Server files not found in project root. Please install them first to avoid build inclusion.", MessageType.Warning);
-                if (GUILayout.Button("Install Server Files to Project Root"))
-                {
-                    InstallServerFiles();
-                }
-            }
-            else
-            {
-                EditorGUILayout.HelpBox($"Server files installed at: {TargetServerPath}", MessageType.Info);
-                if (GUILayout.Button("Re-install / Update Server Files"))
-                {
-                    InstallServerFiles();
-                }
-            }
-            GUILayout.EndVertical();
-
-            if (!serverExists) return; // Stop here if not installed
-
-            EditorGUILayout.Space();
-
-            // --- Server Status ---
-            GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("2. Internal Server Status (WebSocket)", EditorStyles.boldLabel);
-            
-            if (UnityMCPServer.IsRunning)
-            {
-                EditorGUILayout.HelpBox($"WebSocket Server is RUNNING at {UnityMCPServer.URL}", MessageType.Info);
-                if (GUILayout.Button("Stop Server"))
-                {
-                    UnityMCPServer.StopServer();
-                }
-            }
-            else
-            {
-                EditorGUILayout.HelpBox("Server is STOPPED", MessageType.Warning);
-                if (GUILayout.Button("Start Server"))
-                {
-                    UnityMCPServer.StartServer();
-                }
-            }
-            GUILayout.EndVertical();
-
-            EditorGUILayout.Space();
-
-            // --- Python Environment (uv) ---
-            GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("3. Python Environment (uv)", EditorStyles.boldLabel);
-
-            if (GUILayout.Button("Install 'uv' and Requirements"))
-            {
-                InstallUVAndRequirements();
-            }
-
-            if (GUILayout.Button("Start Python MCP Server (uv run)"))
-            {
-                StartPythonServerUV();
-            }
-            GUILayout.EndVertical();
-
-            EditorGUILayout.Space();
-
-            // --- Client Configuration ---
-            GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("4. Client Configuration", EditorStyles.boldLabel);
-
-            if (GUILayout.Button("Configure for VS Code (Copilot)"))
-            {
-                GenerateVSCodeConfig();
-            }
-            
-            GUILayout.Label("Manual Config (Claude/Cursor):", EditorStyles.miniLabel);
-            EditorGUILayout.TextArea(GetMCPConfigJson(), GUILayout.Height(100));
-            
-            if (GUILayout.Button("Copy Config to Clipboard"))
-            {
-                GUIUtility.systemCopyBuffer = GetMCPConfigJson();
-                UnityEngine.Debug.Log("Config copied to clipboard!");
-            }
-
-            GUILayout.EndVertical();
+            DrawHeader();
+            DrawSettings();
+            DrawConnection();
+            DrawClientConfig();
         }
+
+        private void DrawHeader()
+        {
+            EditorGUILayout.Space();
+            GUILayout.Label("MCP For Unity", new GUIStyle(EditorStyles.largeLabel) { fontSize = 20, fontStyle = FontStyle.Bold });
+            EditorGUILayout.Space();
+        }
+
+        private void DrawSettings()
+        {
+            GUILayout.Label("Settings", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("Version:", GUILayout.Width(150));
+                    EditorGUILayout.LabelField("v1.0.0", EditorStyles.miniLabel);
+                }
+
+                showDebugLogs = EditorGUILayout.Toggle("Show Debug Logs:", showDebugLogs);
+                validationLevel = (ValidationLevel)EditorGUILayout.EnumPopup("Script Validation Level:", validationLevel);
+                EditorGUILayout.HelpBox("Syntax checks + Unity best practices and warnings", MessageType.None);
+
+                showAdvancedSettings = EditorGUILayout.Foldout(showAdvancedSettings, "Advanced Settings");
+                if (showAdvancedSettings)
+                {
+                    if (GUILayout.Button("Install Server Files to Project Root")) InstallServerFiles();
+                    if (GUILayout.Button("Install 'uv' and Requirements")) InstallUVAndRequirements();
+                }
+            }
+            EditorGUILayout.Space();
+        }
+
+        private void DrawConnection()
+        {
+            GUILayout.Label("Connection", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                transportType = (TransportType)EditorGUILayout.EnumPopup("Transport:", transportType);
+                serverUrl = EditorGUILayout.TextField("URL:", serverUrl);
+
+                EditorGUILayout.LabelField("Use this command to launch the server manually:");
+                string cmd = $"uv run --directory \"{TargetServerPath}\" server.py";
+                
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.TextArea(cmd, GUILayout.Height(40));
+                    if (GUILayout.Button("Copy", GUILayout.Width(50), GUILayout.Height(40)))
+                    {
+                        GUIUtility.systemCopyBuffer = cmd;
+                        UnityEngine.Debug.Log("Command copied to clipboard!");
+                    }
+                }
+
+                EditorGUILayout.HelpBox("Run this command in your shell if you prefer to start the server manually.", MessageType.None);
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    if (GUILayout.Button("Start Internal Server")) UnityMCPServer.StartServer();
+                    if (GUILayout.Button("Stop Internal Server")) UnityMCPServer.StopServer();
+                }
+
+                // Status Indicators
+                EditorGUILayout.Space();
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    Color statusColor = UnityMCPServer.IsRunning ? Color.green : Color.red;
+                    string statusText = UnityMCPServer.IsRunning ? "Running" : "Stopped";
+                    
+                    var style = new GUIStyle(EditorStyles.label);
+                    style.normal.textColor = statusColor;
+                    
+                    GUILayout.Label("●", style, GUILayout.Width(20));
+                    GUILayout.Label($"Internal Server: {statusText}");
+                    
+                    GUILayout.FlexibleSpace();
+                    if (GUILayout.Button("Restart Session")) UnityMCPServer.RestartServer();
+                }
+                
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                     GUILayout.Label("Health:");
+                     GUILayout.Label(UnityMCPServer.IsRunning ? "Healthy" : "Unknown"); 
+                     GUILayout.FlexibleSpace();
+                     if (GUILayout.Button("Test")) UnityEngine.Debug.Log("Test Ping...");
+                }
+            }
+            EditorGUILayout.Space();
+        }
+
+        private void DrawClientConfig()
+        {
+            GUILayout.Label("Client Configuration", EditorStyles.boldLabel);
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                selectedClient = (ClientType)EditorGUILayout.EnumPopup("Client:", selectedClient);
+                
+                if (GUILayout.Button("Configure All Detected Clients"))
+                {
+                    GenerateVSCodeConfig();
+                }
+
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    bool configured = File.Exists(Path.Combine(ProjectRoot, ".vscode/mcp.json"));
+                    Color statusColor = configured ? Color.green : Color.red;
+                    string statusText = configured ? "Configured" : "Not Configured";
+
+                    var style = new GUIStyle(EditorStyles.label);
+                    style.normal.textColor = statusColor;
+
+                    GUILayout.Label("●", style, GUILayout.Width(20));
+                    GUILayout.Label(statusText);
+                    GUILayout.FlexibleSpace();
+                    if (GUILayout.Button("Configure")) GenerateVSCodeConfig();
+                }
+
+                showManualConfig = EditorGUILayout.Foldout(showManualConfig, "Manual Configuration");
+                if (showManualConfig)
+                {
+                    EditorGUILayout.TextArea(GetMCPConfigJson(), GUILayout.Height(100));
+                    if (GUILayout.Button("Copy Config"))
+                    {
+                        GUIUtility.systemCopyBuffer = GetMCPConfigJson();
+                    }
+                }
+            }
+        }
+
+        // --- Helpers ---
 
         private void InstallServerFiles()
         {
-            // Try to find the package path
             string packagePath = Path.GetFullPath("Packages/com.yunuscan.unitymcp");
-            if (!Directory.Exists(packagePath))
-            {
-                // Fallback for local development
-                packagePath = ProjectRoot; 
-            }
+            if (!Directory.Exists(packagePath)) packagePath = ProjectRoot; 
 
             string sourceServer = Path.Combine(packagePath, "Server");
             
             if (!Directory.Exists(sourceServer))
             {
-                UnityEngine.Debug.LogError($"Could not find source Server folder at {sourceServer}");
-                return;
+                // Try Assets/MCP/Server if package not found (dev mode)
+                sourceServer = Path.Combine(ProjectRoot, "Assets/MCP/Server");
+                if(!Directory.Exists(sourceServer))
+                {
+                     UnityEngine.Debug.LogError($"Could not find source Server folder.");
+                     return;
+                }
             }
 
             if (!Directory.Exists(TargetServerPath)) Directory.CreateDirectory(TargetServerPath);
 
-            // Copy files
             foreach (string file in Directory.GetFiles(sourceServer))
             {
                 if (file.EndsWith(".meta")) continue;
@@ -144,43 +201,14 @@ namespace UnityMCP
         private void InstallUVAndRequirements()
         {
             string requirementsPath = Path.Combine(TargetServerPath, "requirements.txt");
-            // Install uv via pip if not exists, then sync
             RunCommand($"pip install uv && uv pip install -r \"{requirementsPath}\" --system");
-        }
-
-        private void StartPythonServerUV()
-        {
-            string serverScript = Path.Combine(TargetServerPath, "server.py");
-            // Use uv run to execute
-            RunCommand($"uv run \"{serverScript}\"", false);
         }
 
         private void GenerateVSCodeConfig()
         {
             string vscodeDir = Path.Combine(ProjectRoot, ".vscode");
-            
             if (!Directory.Exists(vscodeDir)) Directory.CreateDirectory(vscodeDir);
 
-            // 1. tasks.json
-            string tasksJson = @"{
-    ""version"": ""2.0.0"",
-    ""tasks"": [
-        {
-            ""label"": ""Start Unity MCP Server"",
-            ""type"": ""shell"",
-            ""command"": ""uv"",
-            ""args"": [""run"", ""MCPServer/server.py""],
-            ""presentation"": {
-                ""reveal"": ""always"",
-                ""panel"": ""new""
-            },
-            ""problemMatcher"": []
-        }
-    ]
-}";
-            File.WriteAllText(Path.Combine(vscodeDir, "tasks.json"), tasksJson);
-
-            // 2. mcp.json
             string mcpJson = GetMCPConfigJson();
             File.WriteAllText(Path.Combine(vscodeDir, "mcp.json"), mcpJson);
 
@@ -191,7 +219,6 @@ namespace UnityMCP
         private string GetMCPConfigJson()
         {
             string scriptPath = Path.Combine(TargetServerPath, "server.py").Replace("\\", "/");
-            
             return $@"{{
   ""mcpServers"": {{
     ""unity"": {{
@@ -208,27 +235,16 @@ namespace UnityMCP
             {
                 FileName = "cmd.exe",
                 Arguments = $"/c {command}",
-                UseShellExecute = true, // Use shell to open new window for server
-                CreateNoWindow = waitForExit // Hide window if just installing
+                UseShellExecute = true,
+                CreateNoWindow = waitForExit
             };
 
-            if (!waitForExit)
-            {
-                startInfo.WindowStyle = ProcessWindowStyle.Normal;
-            }
+            if (!waitForExit) startInfo.WindowStyle = ProcessWindowStyle.Normal;
 
             try
             {
                 Process process = Process.Start(startInfo);
-                if (waitForExit)
-                {
-                    process.WaitForExit();
-                    UnityEngine.Debug.Log($"Command executed: {command}");
-                }
-                else
-                {
-                    UnityEngine.Debug.Log($"Command started: {command}");
-                }
+                if (waitForExit) process.WaitForExit();
             }
             catch (System.Exception e)
             {
