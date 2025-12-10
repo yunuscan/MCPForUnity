@@ -218,15 +218,14 @@ namespace UnityMCP
 
         private string GetMCPConfigJson()
         {
-            string scriptPath = Path.Combine(TargetServerPath, "server.py").Replace("\\", "/");
-            return $@"{{
-  ""mcpServers"": {{
-    ""unity"": {{
-      ""command"": ""uv"",
-      ""args"": [""run"", ""{scriptPath}""]
-    }}
-  }}
-}}";
+            // SSE Configuration
+            return @"{
+  ""mcpServers"": {
+    ""unity"": {
+      ""url"": ""http://localhost:8000/sse""
+    }
+  }
+}";
         }
 
         private void RunCommand(string command, bool waitForExit = true)

@@ -166,4 +166,5 @@ async def set_component_property(object_name: str, component_name: str, property
                                value_param=value)
 
 if __name__ == "__main__":
-    mcp.run()
+    # Run as SSE server for better compatibility with VS Code / Cursor
+    mcp.run(transport="sse")
