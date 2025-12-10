@@ -13,14 +13,44 @@ namespace UnityMCP
             GetWindow<UnityMCPEditorWindow>("UnityMCP");
         }
 
+        private string ProjectRoot => Directory.GetParent(Application.dataPath).FullName;
+        private string TargetServerPath => Path.Combine(ProjectRoot, "MCPServer");
+
         private void OnGUI()
         {
             GUILayout.Label("Unity MCP Server Control", EditorStyles.boldLabel);
             EditorGUILayout.Space();
 
+            // --- Server Installation ---
+            GUILayout.BeginVertical(EditorStyles.helpBox);
+            GUILayout.Label("1. Server Installation", EditorStyles.boldLabel);
+            
+            bool serverExists = Directory.Exists(TargetServerPath);
+            if (!serverExists)
+            {
+                EditorGUILayout.HelpBox("Server files not found in project root. Please install them first to avoid build inclusion.", MessageType.Warning);
+                if (GUILayout.Button("Install Server Files to Project Root"))
+                {
+                    InstallServerFiles();
+                }
+            }
+            else
+            {
+                EditorGUILayout.HelpBox($"Server files installed at: {TargetServerPath}", MessageType.Info);
+                if (GUILayout.Button("Re-install / Update Server Files"))
+                {
+                    InstallServerFiles();
+                }
+            }
+            GUILayout.EndVertical();
+
+            if (!serverExists) return; // Stop here if not installed
+
+            EditorGUILayout.Space();
+
             // --- Server Status ---
             GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("Internal Server Status", EditorStyles.boldLabel);
+            GUILayout.Label("2. Internal Server Status", EditorStyles.boldLabel);
             
             if (UnityMCPServer.IsRunning)
             {
@@ -44,7 +74,7 @@ namespace UnityMCP
 
             // --- Python Environment (uv) ---
             GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("Python Environment (uv)", EditorStyles.boldLabel);
+            GUILayout.Label("3. Python Environment (uv)", EditorStyles.boldLabel);
 
             if (GUILayout.Button("Install 'uv' and Requirements"))
             {
@@ -61,7 +91,7 @@ namespace UnityMCP
 
             // --- Client Configuration ---
             GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("Client Configuration", EditorStyles.boldLabel);
+            GUILayout.Label("4. Client Configuration", EditorStyles.boldLabel);
 
             if (GUILayout.Button("Configure for VS Code (Copilot)"))
             {
@@ -80,24 +110,54 @@ namespace UnityMCP
             GUILayout.EndVertical();
         }
 
+        private void InstallServerFiles()
+        {
+            // Try to find the package path
+            string packagePath = Path.GetFullPath("Packages/com.yunuscan.unitymcp");
+            if (!Directory.Exists(packagePath))
+            {
+                // Fallback for local development
+                packagePath = ProjectRoot; 
+            }
+
+            string sourceServer = Path.Combine(packagePath, "Server");
+            
+            if (!Directory.Exists(sourceServer))
+            {
+                UnityEngine.Debug.LogError($"Could not find source Server folder at {sourceServer}");
+                return;
+            }
+
+            if (!Directory.Exists(TargetServerPath)) Directory.CreateDirectory(TargetServerPath);
+
+            // Copy files
+            foreach (string file in Directory.GetFiles(sourceServer))
+            {
+                if (file.EndsWith(".meta")) continue;
+                string dest = Path.Combine(TargetServerPath, Path.GetFileName(file));
+                File.Copy(file, dest, true);
+            }
+
+            UnityEngine.Debug.Log($"Server files installed to {TargetServerPath}");
+        }
+
         private void InstallUVAndRequirements()
         {
-            string requirementsPath = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Server", "requirements.txt");
+            string requirementsPath = Path.Combine(TargetServerPath, "requirements.txt");
             // Install uv via pip if not exists, then sync
             RunCommand($"pip install uv && uv pip install -r \"{requirementsPath}\" --system");
         }
 
         private void StartPythonServerUV()
         {
-            string serverScript = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Server", "server.py");
+            string serverScript = Path.Combine(TargetServerPath, "server.py");
             // Use uv run to execute
             RunCommand($"uv run \"{serverScript}\"", false);
         }
 
         private void GenerateVSCodeConfig()
         {
-            string projectRoot = Directory.GetParent(Application.dataPath).FullName;
-            string vscodeDir = Path.Combine(projectRoot, ".vscode");
+            string vscodeDir = Path.Combine(ProjectRoot, ".vscode");
             
             if (!Directory.Exists(vscodeDir)) Directory.CreateDirectory(vscodeDir);
 
@@ -109,7 +169,7 @@ namespace UnityMCP
             ""label"": ""Start Unity MCP Server"",
             ""type"": ""shell"",
             ""command"": ""uv"",
-            ""args"": [""run"", ""Server/server.py""],
+            ""args"": [""run"", ""MCPServer/server.py""],
             ""presentation"": {
                 ""reveal"": ""always"",
                 ""panel"": ""new""
@@ -120,8 +180,7 @@ namespace UnityMCP
 }";
             File.WriteAllText(Path.Combine(vscodeDir, "tasks.json"), tasksJson);
 
-            // 2. mcp.json (Standard for some extensions) or settings.json
-            // For GitHub Copilot, we might need to wait for official support, but we can generate a standard config.
+            // 2. mcp.json
             string mcpJson = GetMCPConfigJson();
             File.WriteAllText(Path.Combine(vscodeDir, "mcp.json"), mcpJson);
 
@@ -131,7 +190,7 @@ namespace UnityMCP
 
         private string GetMCPConfigJson()
         {
-            string scriptPath = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Server", "server.py").Replace("\\", "/");
+            string scriptPath = Path.Combine(TargetServerPath, "server.py").Replace("\\", "/");
             
             return $@"{{
   ""mcpServers"": {{
