@@ -107,7 +107,42 @@ namespace UnityMCP
                 return;
             }
 
-            // 3. Execute Command
+            // 3. Hierarchy (New)
+            if (method == "GET" && path == "/hierarchy")
+            {
+                // Must run on main thread to access Unity API
+                string hierarchy = "";
+                bool done = false;
+                
+                EditorApplication.delayCall += () =>
+                {
+                    StringBuilder sb = new StringBuilder();
+                    foreach (GameObject go in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
+                    {
+                        sb.AppendLine($"- {go.name} (ID: {go.GetInstanceID()})");
+                        foreach(Transform child in go.transform)
+                        {
+                            sb.AppendLine($"  - {child.name} (ID: {child.gameObject.GetInstanceID()})");
+                        }
+                    }
+                    hierarchy = sb.ToString();
+                    done = true;
+                };
+
+                // Simple wait for main thread (not production ready but works for simple example)
+                // In production, use TaskCompletionSource
+                int timeout = 100;
+                while (!done && timeout > 0)
+                {
+                    System.Threading.Thread.Sleep(10);
+                    timeout--;
+                }
+                
+                SendResponse(context, hierarchy);
+                return;
+            }
+
+            // 4. Execute Command
             if (method == "POST" && path == "/execute")
             {
                 using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))

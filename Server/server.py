@@ -40,5 +40,19 @@ def read_console() -> str:
     except requests.exceptions.ConnectionError:
         return "Could not connect to Unity."
 
+@mcp.resource("unity://console")
+def get_console_logs() -> str:
+    """Resource: Access the Unity Editor Console logs as a text stream."""
+    return read_console()
+
+@mcp.resource("unity://hierarchy")
+def get_scene_hierarchy() -> str:
+    """Resource: Get the current scene hierarchy (Root objects and first level children)."""
+    try:
+        response = requests.get(f"{UNITY_HOST}/hierarchy", timeout=2)
+        return response.text if response.text else "Scene is empty."
+    except requests.exceptions.ConnectionError:
+        return "Could not connect to Unity."
+
 if __name__ == "__main__":
     mcp.run()
