@@ -5,7 +5,8 @@ This project implements a Model Context Protocol (MCP) server that acts as a bri
 ## Structure
 
 - **Server/**: Contains the Python MCP server that AI clients connect to.
-- **UnityPackage/**: Contains the Unity Package (C# scripts) to be installed in your Unity project.
+- **Scripts/**: Contains the Unity C# scripts.
+- **package.json**: Unity Package definition file.
 
 ## Installation
 
@@ -18,7 +19,7 @@ You can install the Unity integration directly from GitHub using the Unity Packa
 4. Select **Add package from git URL...**.
 5. Enter the following URL:
    ```
-   https://github.com/yunuscan/MCPForUnity.git?path=/UnityPackage
+   https://github.com/yunuscan/MCPForUnity.git
    ```
 6. Click **Add**.
 
@@ -28,6 +29,7 @@ You can install the Unity integration directly from GitHub using the Unity Packa
    pip install -r Server/requirements.txt
    ```
 2. Run the server:
+
    ```bash
    python Server/server.py
    ```
