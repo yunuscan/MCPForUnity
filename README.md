@@ -23,19 +23,23 @@ You can install the Unity integration directly from GitHub using the Unity Packa
    ```
 6. Click **Add**.
 
-### 2. Python Server Setup
-1. Install dependencies:
-   ```bash
-   pip install -r Server/requirements.txt
-   ```
-2. Run the server:
+### 2. Python Server Setup (via Unity Editor)
+1. In Unity, go to **UnityMCP > Dashboard**.
+2. Click **Install 'uv' and Requirements**.
+3. Click **Start Python MCP Server (uv run)** to test the connection.
 
-   ```bash
-   python Server/server.py
-   ```
+### 3. Client Configuration (VS Code / Copilot / Claude)
+To use this with your AI assistant:
+
+1. Open the **UnityMCP > Dashboard** window.
+2. Click **Configure for VS Code (Copilot)**.
+   - This will generate a `.vscode/mcp.json` file in your project root.
+   - It will also create a `tasks.json` to easily run the server.
+3. Alternatively, copy the JSON config manually for Claude Desktop or Cursor.
 
 ## Usage
-1. Ensure the Unity project is open and the package is installed. You should see `[UnityMCP] Server started...` in the Unity Console.
-2. Run the Python server.
-3. Connect your AI client (e.g., Claude Desktop, Cursor) to the MCP server.
+1. Ensure the Unity project is open.
+2. Connect your AI client using the generated configuration.
+3. Ask your AI to "Create a cube" or "Check console logs".
+
 

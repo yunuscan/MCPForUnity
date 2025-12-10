@@ -42,33 +42,33 @@ namespace UnityMCP
 
             EditorGUILayout.Space();
 
-            // --- Python Environment ---
+            // --- Python Environment (uv) ---
             GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("Python Environment", EditorStyles.boldLabel);
+            GUILayout.Label("Python Environment (uv)", EditorStyles.boldLabel);
 
-            if (GUILayout.Button("Install Requirements (pip)"))
+            if (GUILayout.Button("Install 'uv' and Requirements"))
             {
-                InstallRequirements();
+                InstallUVAndRequirements();
             }
 
-            if (GUILayout.Button("Start Python MCP Server"))
+            if (GUILayout.Button("Start Python MCP Server (uv run)"))
             {
-                StartPythonServer();
+                StartPythonServerUV();
             }
             GUILayout.EndVertical();
 
             EditorGUILayout.Space();
 
-            // --- Configuration ---
+            // --- Client Configuration ---
             GUILayout.BeginVertical(EditorStyles.helpBox);
-            GUILayout.Label("Configuration", EditorStyles.boldLabel);
+            GUILayout.Label("Client Configuration", EditorStyles.boldLabel);
 
-            if (GUILayout.Button("Generate VS Code Config (.vscode)"))
+            if (GUILayout.Button("Configure for VS Code (Copilot)"))
             {
                 GenerateVSCodeConfig();
             }
             
-            GUILayout.Label("Use this config for your AI Client (Claude/Cursor):", EditorStyles.miniLabel);
+            GUILayout.Label("Manual Config (Claude/Cursor):", EditorStyles.miniLabel);
             EditorGUILayout.TextArea(GetMCPConfigJson(), GUILayout.Height(100));
             
             if (GUILayout.Button("Copy Config to Clipboard"))
@@ -80,16 +80,18 @@ namespace UnityMCP
             GUILayout.EndVertical();
         }
 
-        private void InstallRequirements()
+        private void InstallUVAndRequirements()
         {
             string requirementsPath = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Server", "requirements.txt");
-            RunCommand($"pip install -r \"{requirementsPath}\"");
+            // Install uv via pip if not exists, then sync
+            RunCommand($"pip install uv && uv pip install -r \"{requirementsPath}\" --system");
         }
 
-        private void StartPythonServer()
+        private void StartPythonServerUV()
         {
             string serverScript = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Server", "server.py");
-            RunCommand($"python \"{serverScript}\"", false);
+            // Use uv run to execute
+            RunCommand($"uv run \"{serverScript}\"", false);
         }
 
         private void GenerateVSCodeConfig()
@@ -99,14 +101,15 @@ namespace UnityMCP
             
             if (!Directory.Exists(vscodeDir)) Directory.CreateDirectory(vscodeDir);
 
+            // 1. tasks.json
             string tasksJson = @"{
     ""version"": ""2.0.0"",
     ""tasks"": [
         {
-            ""label"": ""Start MCP Server"",
+            ""label"": ""Start Unity MCP Server"",
             ""type"": ""shell"",
-            ""command"": ""python"",
-            ""args"": [""Server/server.py""],
+            ""command"": ""uv"",
+            ""args"": [""run"", ""Server/server.py""],
             ""presentation"": {
                 ""reveal"": ""always"",
                 ""panel"": ""new""
@@ -116,20 +119,25 @@ namespace UnityMCP
     ]
 }";
             File.WriteAllText(Path.Combine(vscodeDir, "tasks.json"), tasksJson);
-            UnityEngine.Debug.Log("VS Code configuration generated in .vscode/tasks.json");
-            EditorUtility.RevealInFinder(Path.Combine(vscodeDir, "tasks.json"));
+
+            // 2. mcp.json (Standard for some extensions) or settings.json
+            // For GitHub Copilot, we might need to wait for official support, but we can generate a standard config.
+            string mcpJson = GetMCPConfigJson();
+            File.WriteAllText(Path.Combine(vscodeDir, "mcp.json"), mcpJson);
+
+            UnityEngine.Debug.Log($"VS Code configuration generated in {vscodeDir}");
+            EditorUtility.RevealInFinder(vscodeDir);
         }
 
         private string GetMCPConfigJson()
         {
-            string pythonPath = "python"; // Or absolute path if known
             string scriptPath = Path.Combine(Directory.GetParent(Application.dataPath).FullName, "Server", "server.py").Replace("\\", "/");
             
             return $@"{{
   ""mcpServers"": {{
     ""unity"": {{
-      ""command"": ""{pythonPath}"",
-      ""args"": [""{scriptPath}""]
+      ""command"": ""uv"",
+      ""args"": [""run"", ""{scriptPath}""]
     }}
   }}
 }}";
